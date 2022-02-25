@@ -26,8 +26,7 @@ def getTable(soupInstance, id):
     for row in rows:
         cols = row.find_all('td')
         cols = [ele.text.strip() for ele in cols]
-        data.append(cols)
-        # data.append([ele for ele in cols if ele]) # Get rid of empty
+        data.append([ele for ele in cols if ele]) # Get rid of empty
 
     return data
 
@@ -119,6 +118,56 @@ def getPortfolioRatingSummary(soupInstance):
     return df[df.Category.str.len() > 0]
 
 
+def insertPortfolioAllocation(portfolioName, df):
+
+    payload = {
+        'Portfolio' : portfolioName,
+        'Holdings' : df.to_dict('records')
+    }
+
+    db.PortfolioAllocation.replace_one({'Portfolio': portfolioName}, payload, upsert=True)
+
+
+def insertComponentsReturnsTable(portfolioName, df):
+
+    payload = {'Portfolio' : portfolioName}
+
+    for record in df.to_dict('records'):
+        name = record['Name']
+        del record['Name']
+
+        if name != 'Inflation Adjusted return':
+            payload['Return'] = record
+        else:
+            payload['Inflation Adjusted return'] = record
+
+    db.ComponentsReturnsTable.replace_one({'Portfolio': portfolioName}, payload, upsert=True) 
+
+
+def insertHistoricalReturnsTable(portfolioName, df):
+
+    payload = {'Portfolio' : portfolioName}
+
+    for record in df.to_dict('records'):
+        period = record['Period']
+        del record['Period']
+        payload[period] = record
+
+    db.HistoricalReturnsTable.replace_one({'Portfolio': portfolioName}, payload, upsert=True)
+
+
+def insertPortfolioRatingSummary(portfolioName, df):
+
+    payload = {'Portfolio' : portfolioName}
+
+    for record in df.to_dict('records'):
+        category = record['Category']
+        del record['Category']
+        payload[category] = record
+
+    db.PortfolioRatingSummary.replace_one({'Portfolio': portfolioName}, payload, upsert=True)
+
+
 if __name__ == "__main__":
 
     # CREATE CONNECTION TO DATABASE
@@ -142,11 +191,30 @@ if __name__ == "__main__":
     # SCRAPE DATA FROM ALL UNIQUE PORTFOLIO URLS
     # TODO: FINISH DB INSERT FOR ALL FUNCTIONS
     for i, url in enumerate(sorted(urls)):
-        if i == 1:
+        
+        try:
+            
             reqs = requests.get(url)
             soup = BeautifulSoup(reqs.text, 'html.parser')
 
+            # 'http://www.lazyportfolioetf.com/allocation/aggressive-global-income/' -> 'aggressive-global-income'
+            portfolioName = list(filter(None, url.split('/')))[-1] 
+
+            df = getPortfolioAllocation(soup)
+
+            insertPortfolioAllocation(portfolioName, df)
+
+            df = getComponentsReturnsTable(soup)
+
+            insertComponentsReturnsTable(portfolioName, df)
+
+            df = getHistoricalReturnsTable(soup)
+            
+            insertHistoricalReturnsTable(portfolioName, df)
+            
             df = getPortfolioRatingSummary(soup)
 
-            print(df.to_dict())
-            db.PortfolioRatingSummary.insert_one({'record':df.to_dict('r')})
+            insertPortfolioRatingSummary(portfolioName, df)
+
+        except:
+            print(i)
