@@ -65,7 +65,10 @@ def getComponentsReturnsTable(soupInstance):
         else:
             data.append(row)
 
-    return pd.DataFrame(data, columns=['Name',datetime.now().strftime('%b %Y'),'1M','6M','1Y','5Y','10Y','25Y'])
+    columns=['Name',datetime.now().strftime('%b %Y'),'1M','6M','1Y','5Y','10Y','25Y']
+    colNums=max([len(row) for row in data])
+
+    return pd.DataFrame(data, columns=columns[0:colNums])
 
 
 def getHistoricalReturnsTable(soupInstance):
@@ -104,14 +107,13 @@ def getPortfolioRatingSummary(soupInstance):
 
     data = []
     for row in table:
-        if 'Rating assigned considering all the Low Risk Portfolios' in row:
-            break
-        else:
-            cols = []
-            for ele in [ele.split('\n')[0].replace('\t','') for ele in row]:
-                cols.extend([subele.strip().replace('+','') for subele in ele.split(':')])
+        cols = []
+        for ele in [ele.split('\n')[0].replace('\t','') for ele in row]:
+            cols.extend([subele.replace('+','').replace('%','').replace('(', ' (25 yr ').replace('25 Years Ann. ','').strip() for subele in ele.split(':')])
 
-            data.append(cols)
+        data.append(cols)
+
+    data.pop(-1)
 
     df = pd.DataFrame(data, columns=['Category','Grade','Low Risk Portfolios Grade', 'Low Risk Portfolios Rating', 'All Portfolios Grade', 'All Portfolios Rating'])
 
@@ -189,32 +191,31 @@ if __name__ == "__main__":
             urls.add(url)
 
     # SCRAPE DATA FROM ALL UNIQUE PORTFOLIO URLS
-    # TODO: FINISH DB INSERT FOR ALL FUNCTIONS
-    for i, url in enumerate(sorted(urls)):
+    for url in sorted(urls):
+                    
+        reqs = requests.get(url)
+        soup = BeautifulSoup(reqs.text, 'html.parser')
+
+        # # 'http://www.lazyportfolioetf.com/allocation/aggressive-global-income/' -> 'aggressive-global-income'
+        portfolioName = list(filter(None, url.split('/')))[-1] 
+
+        df = getPortfolioAllocation(soup)
+
+        insertPortfolioAllocation(portfolioName, df)
+
+        df = getComponentsReturnsTable(soup)
+
+        insertComponentsReturnsTable(portfolioName, df)
+
+        df = getHistoricalReturnsTable(soup)
+        
+        insertHistoricalReturnsTable(portfolioName, df)
         
         try:
-            
-            reqs = requests.get(url)
-            soup = BeautifulSoup(reqs.text, 'html.parser')
-
-            # 'http://www.lazyportfolioetf.com/allocation/aggressive-global-income/' -> 'aggressive-global-income'
-            portfolioName = list(filter(None, url.split('/')))[-1] 
-
-            df = getPortfolioAllocation(soup)
-
-            insertPortfolioAllocation(portfolioName, df)
-
-            df = getComponentsReturnsTable(soup)
-
-            insertComponentsReturnsTable(portfolioName, df)
-
-            df = getHistoricalReturnsTable(soup)
-            
-            insertHistoricalReturnsTable(portfolioName, df)
-            
             df = getPortfolioRatingSummary(soup)
 
             insertPortfolioRatingSummary(portfolioName, df)
 
-        except:
-            print(i)
+        # Portfolio Rating Summary doesn't exist
+        except AttributeError as e: 
+            print(e)
